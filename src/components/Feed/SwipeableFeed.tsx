@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useFeedStore } from '../../store/feedStore';
 import { usePodcastFeed } from '../../hooks/usePodcastFeed';
 import { useSwipeFeed } from '../../hooks/useSwipeFeed';
+import { preloadAudio } from '../../hooks/useAudioPlayer';
 import { EpisodeCard } from './EpisodeCard';
 import { EpisodeCardSkeleton } from '../UI/Skeleton';
 
@@ -20,18 +21,18 @@ export function SwipeableFeed() {
 
   const { episodes, currentIndex, isLoading } = feed;
   const currentEpisode = episodes[currentIndex] ?? null;
-
   const direction = useRef(0);
 
-  const handleNext = () => {
-    direction.current = -1;
-    feed.nextEpisode();
-  };
+  // Pre-load audio for next 2 episodes whenever index changes
+  useEffect(() => {
+    for (let i = 1; i <= 2; i++) {
+      const ep = episodes[currentIndex + i];
+      if (ep?.audioUrl) preloadAudio(ep.audioUrl);
+    }
+  }, [currentIndex, episodes]);
 
-  const handlePrev = () => {
-    direction.current = 1;
-    feed.prevEpisode();
-  };
+  const handleNext = () => { direction.current = -1; feed.nextEpisode(); };
+  const handlePrev = () => { direction.current = 1;  feed.prevEpisode(); };
 
   const { handlers } = useSwipeFeed(handleNext, handlePrev);
 
@@ -77,7 +78,6 @@ export function SwipeableFeed() {
         </AnimatePresence>
       )}
 
-      {/* Loading indicator when fetching more */}
       {isLoading && episodes.length > 0 && (
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
           <div className="h-full bg-white/40 animate-pulse rounded-full" />

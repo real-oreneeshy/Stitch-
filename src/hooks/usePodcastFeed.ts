@@ -3,7 +3,7 @@ import { useFeedStore } from '../store/feedStore';
 import { usePreferenceStore } from '../store/preferenceStore';
 import { parsePodcastFeed } from '../services/rssParser';
 import { rankEpisodes } from '../services/feedAlgorithm';
-import { SEED_PODCASTS, getPodcastsByCategory } from '../services/seedCatalog';
+import { SEED_PODCASTS } from '../services/seedCatalog';
 import type { Episode, Podcast } from '../types/podcast';
 
 const FEED_LOAD_THRESHOLD = 5;
@@ -20,9 +20,9 @@ export function usePodcastFeed() {
       feed.setLoading(true);
       feed.setError(null);
 
-      // Collect all episodes as feeds resolve, re-rank and append incrementally
       const allEpisodes: Episode[] = [];
       let resolved = 0;
+      let firstBatchShown = false;
 
       const promises = podcasts.map(p =>
         parsePodcastFeed(p)
@@ -30,24 +30,21 @@ export function usePodcastFeed() {
             allEpisodes.push(...episodes);
             resolved++;
 
-            // After first 2 feeds resolve, show something immediately
-            if (resolved === 2 || resolved === podcasts.length) {
+            // Show episodes as soon as the very first feed resolves
+            if (!firstBatchShown) {
+              firstBatchShown = true;
               const ranked = rankEpisodes([...allEpisodes], prefs, feed.seenIds);
               feed.appendEpisodes(ranked);
             }
           })
-          .catch(() => {
-            // silently skip failed feeds
-          })
+          .catch(() => { /* skip failed feeds silently */ })
       );
 
       await Promise.allSettled(promises);
 
-      // Final rank pass with everything
-      if (resolved > 2) {
-        const ranked = rankEpisodes([...allEpisodes], prefs, feed.seenIds);
-        feed.appendEpisodes(ranked);
-      }
+      // Final pass with all resolved feeds merged + re-ranked
+      const ranked = rankEpisodes([...allEpisodes], prefs, feed.seenIds);
+      feed.appendEpisodes(ranked);
 
       feed.setLoading(false);
       loadingRef.current = false;
@@ -56,27 +53,24 @@ export function usePodcastFeed() {
   );
 
   const initFeed = useCallback(async () => {
-    const { selectedCategories, onboardingComplete } = prefs;
+    // Always start with full seed catalog (20 podcasts) for a rich pool
+    const seedPool = [...SEED_PODCASTS];
 
-    let podcastsToLoad: Podcast[];
-
-    if (onboardingComplete && selectedCategories.length > 0) {
-      const fromPrefs = selectedCategories.flatMap(cat => getPodcastsByCategory(cat));
-      const seen = new Set<string>();
-      podcastsToLoad = fromPrefs.filter(p => {
-        if (seen.has(p.id)) return false;
-        seen.add(p.id);
-        return true;
+    // Bump preferred-category podcasts to the front so they resolve first
+    const { selectedCategories } = prefs;
+    if (selectedCategories.length > 0) {
+      seedPool.sort((a, b) => {
+        const aMatch = a.categories.some(c => selectedCategories.includes(c)) ? 0 : 1;
+        const bMatch = b.categories.some(c => selectedCategories.includes(c)) ? 0 : 1;
+        return aMatch - bMatch;
       });
-    } else {
-      podcastsToLoad = SEED_PODCASTS.slice(0, 8);
     }
 
-    const subscribed = feed.subscribedPodcasts;
-    for (const p of subscribed) {
-      if (!podcastsToLoad.find(existing => existing.id === p.id)) {
-        podcastsToLoad = [...podcastsToLoad, p];
-      }
+    // Prepend any subscribed podcasts not already in the list
+    const podcastsToLoad: Podcast[] = [];
+    const seen = new Set<string>();
+    for (const p of [...feed.subscribedPodcasts, ...seedPool]) {
+      if (!seen.has(p.id)) { seen.add(p.id); podcastsToLoad.push(p); }
     }
 
     await loadFromPodcasts(podcastsToLoad);
