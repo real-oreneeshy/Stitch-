@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { Heart, Share2, Info, ChevronUp, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Heart, Share2, Info, ChevronUp, ChevronDown, Play, Pause } from 'lucide-react';
 import type { Episode } from '../../types/podcast';
 import { ProgressBar } from '../UI/ProgressBar';
 import { AudioControls } from '../Player/AudioControls';
@@ -44,6 +44,7 @@ export function EpisodeCard({
   const playerStore = usePlayerStore();
   const prefs = usePreferences();
   const [showInfo, setShowInfo] = useState(false);
+  const [showPlayPulse, setShowPlayPulse] = useState(false);
   const playStartTime = useRef<number | null>(null);
   const hasTrackedPlay = useRef(false);
 
@@ -89,6 +90,12 @@ export function EpisodeCard({
     prefs.onLike(episode);
   };
 
+  const handleTapCenter = () => {
+    player.togglePlay();
+    setShowPlayPulse(true);
+    setTimeout(() => setShowPlayPulse(false), 600);
+  };
+
   const handleShare = async () => {
     if (navigator.share) {
       await navigator.share({
@@ -110,19 +117,40 @@ export function EpisodeCard({
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/80" />
       </div>
 
-      {/* Center artwork */}
-      <div className="absolute inset-0 flex items-center justify-center pt-16 pb-48">
+      {/* Center artwork — tap to play/pause */}
+      <div
+        className="absolute inset-0 flex items-center justify-center pt-16 pb-48 cursor-pointer"
+        onClick={handleTapCenter}
+      >
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.3 }}
-          className="w-56 h-56 sm:w-72 sm:h-72 rounded-2xl overflow-hidden shadow-2xl"
+          className="relative w-56 h-56 sm:w-72 sm:h-72 rounded-2xl overflow-hidden shadow-2xl"
         >
           <img
             src={episode.imageUrl || episode.podcastImageUrl}
             alt={episode.title}
             className="w-full h-full object-cover"
           />
+          {/* Play/pause pulse overlay */}
+          <AnimatePresence>
+            {showPlayPulse && (
+              <motion.div
+                initial={{ opacity: 0.8, scale: 0.6 }}
+                animate={{ opacity: 0, scale: 1.4 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-2xl"
+              >
+                {playerStore.status === 'playing' ? (
+                  <Pause size={56} className="text-white drop-shadow-lg" />
+                ) : (
+                  <Play size={56} className="text-white drop-shadow-lg" />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </div>
 
