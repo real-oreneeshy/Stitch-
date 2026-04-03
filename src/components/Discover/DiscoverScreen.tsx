@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { SearchBar } from './SearchBar';
 import { PodcastCard } from './PodcastCard';
 import { searchPodcasts } from '../../services/itunesSearch';
 import { SEED_PODCASTS, ALL_CATEGORIES } from '../../services/seedCatalog';
+import { usePreferenceStore } from '../../store/preferenceStore';
+import { useFeedStore } from '../../store/feedStore';
 import type { Podcast } from '../../types/podcast';
 
 export function DiscoverScreen() {
@@ -10,6 +13,22 @@ export function DiscoverScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const prefStore = usePreferenceStore();
+  const feedStore = useFeedStore();
+
+  const handleResetOnboarding = () => {
+    prefStore.completeOnboarding([]);          // clear categories
+    // Reach into store internals to wipe onboarding flag
+    usePreferenceStore.setState({
+      onboardingComplete: false,
+      selectedCategories: [],
+      categoryScores: {},
+      podcastScores: {},
+      likedEpisodeIds: new Set(),
+      events: [],
+    });
+    feedStore.setEpisodes([]);
+  };
 
   const featuredByCategory = activeCategory
     ? SEED_PODCASTS.filter(p => p.categories.includes(activeCategory))
@@ -39,7 +58,16 @@ export function DiscoverScreen() {
     <div className="h-full bg-black flex flex-col">
       {/* Header */}
       <div className="px-4 pt-12 pb-4 shrink-0">
-        <h1 className="text-white text-2xl font-bold mb-4">Discover</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-white text-2xl font-bold">Discover</h1>
+          <button
+            onClick={handleResetOnboarding}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 text-white/60 text-xs hover:bg-white/20 transition-colors"
+          >
+            <RotateCcw size={12} />
+            Reset taste
+          </button>
+        </div>
         <SearchBar onSearch={handleSearch} />
       </div>
 
