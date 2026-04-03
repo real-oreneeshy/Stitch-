@@ -24,6 +24,43 @@ function preferenceScore(episode: Episode, prefs: UserPreferences): number {
   return weight > 0 ? score / weight : 0;
 }
 
+/**
+ * Interleave episodes across podcasts using a round-robin approach.
+ * Each "column" is one podcast's episodes sorted by score descending.
+ * We pick one episode per podcast per round, cycling through podcasts
+ * ordered by their best episode's score — so preferred podcasts still
+ * appear more frequently but never cluster consecutively.
+ */
+function interleaveByPodcast(scored: { ep: Episode; total: number }[]): Episode[] {
+  // Group by podcast, each group sorted best-first
+  const groups = new Map<string, { ep: Episode; total: number }[]>();
+  for (const item of scored) {
+    const key = item.ep.podcastId;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(item);
+  }
+
+  // Sort podcasts by their top episode score (best podcast leads each round)
+  const podcastQueues = Array.from(groups.values()).sort(
+    (a, b) => b[0].total - a[0].total
+  );
+
+  const result: Episode[] = [];
+  let hasMore = true;
+
+  while (hasMore) {
+    hasMore = false;
+    for (const queue of podcastQueues) {
+      if (queue.length > 0) {
+        result.push(queue.shift()!.ep);
+        if (queue.length > 0) hasMore = true;
+      }
+    }
+  }
+
+  return result;
+}
+
 export function rankEpisodes(
   episodes: Episode[],
   prefs: UserPreferences,
@@ -34,38 +71,14 @@ export function rankEpisodes(
   const scored = unseen.map(ep => {
     const pScore = preferenceScore(ep, prefs);
     const rScore = recencyScore(ep.publishedAt);
-    const random = Math.random() * 0.1;
-    const total = pScore * 0.6 + rScore * 0.3 + random;
+    // Small random jitter so episodes from same podcast aren't always in same order
+    const jitter = Math.random() * 0.05;
+    const total = pScore * 0.6 + rScore * 0.3 + jitter;
     return { ep, total };
   });
 
+  // Sort within each podcast group before interleaving
   scored.sort((a, b) => b.total - a.total);
 
-  // Interleave: 60% preferred, 30% discovery, 10% serendipity
-  const preferred = scored.filter(s => s.total > 0.4).map(s => s.ep);
-  const discovery = scored.filter(s => s.total <= 0.4 && s.total > 0.1).map(s => s.ep);
-  const serendipity = scored.filter(s => s.total <= 0.1).map(s => s.ep);
-
-  const result: Episode[] = [];
-  let pi = 0, di = 0, si = 0;
-
-  while (result.length < unseen.length) {
-    const batch = Math.min(10, unseen.length - result.length);
-    for (let i = 0; i < batch; i++) {
-      const roll = Math.random();
-      if (roll < 0.6 && pi < preferred.length) {
-        result.push(preferred[pi++]);
-      } else if (roll < 0.9 && di < discovery.length) {
-        result.push(discovery[di++]);
-      } else if (si < serendipity.length) {
-        result.push(serendipity[si++]);
-      } else if (pi < preferred.length) {
-        result.push(preferred[pi++]);
-      } else if (di < discovery.length) {
-        result.push(discovery[di++]);
-      }
-    }
-  }
-
-  return result;
+  return interleaveByPodcast(scored);
 }
