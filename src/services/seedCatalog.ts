@@ -27,7 +27,7 @@ export const SEED_PODCASTS: Podcast[] = [
     author: 'Jack Rhysider',
     description: 'True stories from the dark side of the internet.',
     imageUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Podcasts126/v4/33/db/e1/33dbe1c3-8f94-c4d0-6c83-4efbdcc20d9b/mza_17079552466468729591.jpg/600x600bb.jpg',
-    feedUrl: 'https://feeds.megaphone.fm/darknetdiaries',
+    feedUrl: 'https://darknetdiaries.com/feed.xml',
     categories: ['Technology', 'True Crime'],
   },
   // Science
@@ -46,7 +46,7 @@ export const SEED_PODCASTS: Podcast[] = [
     author: 'WNYC Studios',
     description: 'Investigating a strange world.',
     imageUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Podcasts115/v4/be/99/90/be9990f9-6bc8-2326-b12b-d6c85caa9155/mza_8834879787655090918.jpg/600x600bb.jpg',
-    feedUrl: 'https://feeds.feedburner.com/radiolab',
+    feedUrl: 'https://feeds.wnyc.org/radiolab',
     categories: ['Science', 'Education'],
   },
   // Business
@@ -142,7 +142,7 @@ export const SEED_PODCASTS: Podcast[] = [
     author: 'Dan Carlin',
     description: 'In "Hardcore History" journalist and broadcaster Dan Carlin takes his "Martian" perspective and applies it to the past.',
     imageUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Podcasts125/v4/5a/97/0b/5a970b62-c9af-3b8d-7f95-a32f4e72b527/mza_8985063601316896781.jpg/600x600bb.jpg',
-    feedUrl: 'https://feeds.feedburner.com/dancarlin/history',
+    feedUrl: 'https://podcast.dancarlin.com/feed/',
     categories: ['History', 'Education'],
   },
   {

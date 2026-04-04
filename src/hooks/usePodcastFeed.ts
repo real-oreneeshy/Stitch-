@@ -3,10 +3,20 @@ import { useFeedStore } from '../store/feedStore';
 import { usePreferenceStore } from '../store/preferenceStore';
 import { parsePodcastFeed } from '../services/rssParser';
 import { rankEpisodes } from '../services/feedAlgorithm';
+import { preloadAudio } from './useAudioPlayer';
 import { SEED_PODCASTS } from '../services/seedCatalog';
 import type { Episode, Podcast } from '../types/podcast';
 
 const FEED_LOAD_THRESHOLD = 5;
+// Any feed slower than this is skipped for the visible pool (still resolves eventually)
+const PER_FEED_TIMEOUT_MS = 7000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
 
 export function usePodcastFeed() {
   const feed = useFeedStore();
@@ -28,13 +38,19 @@ export function usePodcastFeed() {
       // so diversity improves progressively without ever clustering.
       await Promise.allSettled(
         podcasts.map(p =>
-          parsePodcastFeed(p)
+          withTimeout(parsePodcastFeed(p), PER_FEED_TIMEOUT_MS)
             .then(eps => {
               pool.push(...eps);
               const ranked = rankEpisodes([...pool], prefs, feed.seenIds);
               feed.replaceUpcoming(ranked);
+              // Pre-warm audio for the next 3 upcoming episodes after each pool update
+              const { currentIndex, episodes } = useFeedStore.getState();
+              for (let i = 1; i <= 3; i++) {
+                const ep = episodes[currentIndex + i];
+                if (ep?.audioUrl) preloadAudio(ep.audioUrl);
+              }
             })
-            .catch(() => {})
+            .catch(() => {}) // timeout or parse error — silently skip
         )
       );
 
