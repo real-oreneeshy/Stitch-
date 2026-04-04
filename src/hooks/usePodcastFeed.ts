@@ -30,18 +30,23 @@ export function usePodcastFeed() {
       feed.setLoading(true);
       feed.setError(null);
 
-      // Accumulated pool — grows as each feed resolves
       const pool: Episode[] = [];
+      const podcastsInPool = new Set<string>();
+      // Don't show anything until we have at least this many distinct podcasts —
+      // prevents the first-feed cluster where only 1 podcast is visible
+      const MIN_DIVERSITY = 3;
 
-      // Fire ALL feeds simultaneously; update the visible queue on EVERY resolve.
-      // replaceUpcoming re-interleaves everything ahead of the current card,
-      // so diversity improves progressively without ever clustering.
       await Promise.allSettled(
         podcasts.map(p =>
           withTimeout(parsePodcastFeed(p), PER_FEED_TIMEOUT_MS)
             .then(eps => {
               pool.push(...eps);
-              // Use persisted seenIds so episodes don't repeat across sessions
+              eps.forEach(ep => podcastsInPool.add(ep.podcastId));
+
+              // Only update the visible feed once we have enough variety,
+              // or if this is likely one of the last feeds (pool is large enough)
+              if (podcastsInPool.size < MIN_DIVERSITY && pool.length < 60) return;
+
               const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
               feed.replaceUpcoming(ranked);
               // Pre-warm audio for the next 3 upcoming episodes after each pool update
