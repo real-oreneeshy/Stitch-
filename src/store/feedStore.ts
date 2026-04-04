@@ -11,6 +11,9 @@ interface FeedState {
 
   setEpisodes: (episodes: Episode[]) => void;
   appendEpisodes: (episodes: Episode[]) => void;
+  // Replace everything AFTER current position with a freshly-interleaved list.
+  // Keeps played history intact; avoids clustering from append-only updates.
+  replaceUpcoming: (episodes: Episode[]) => void;
   setCurrentIndex: (index: number) => void;
   nextEpisode: () => void;
   prevEpisode: () => void;
@@ -36,6 +39,16 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     const existing = new Set(get().episodes.map(e => e.id));
     const fresh = episodes.filter(e => !existing.has(e.id));
     set((s) => ({ episodes: [...s.episodes, ...fresh] }));
+  },
+
+  replaceUpcoming: (episodes) => {
+    const { currentIndex, episodes: current } = get();
+    // Keep everything up to and including the current episode
+    const played = current.slice(0, currentIndex + 1);
+    const playedIds = new Set(played.map(e => e.id));
+    // From the ranked list, only take episodes not already played
+    const upcoming = episodes.filter(e => !playedIds.has(e.id));
+    set({ episodes: [...played, ...upcoming] });
   },
 
   setCurrentIndex: (index) => set({ currentIndex: index }),
