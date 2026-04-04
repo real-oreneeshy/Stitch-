@@ -104,6 +104,17 @@ export const usePreferenceStore = create<PreferenceState>()(
           if (parsed?.state?.likedEpisodeIds) {
             parsed.state.likedEpisodeIds = new Set(parsed.state.likedEpisodeIds);
           }
+          // Migration: if seenEpisodeIds is missing/empty but events exist,
+          // backfill from past engagement history so the fix works immediately
+          if (
+            (!parsed.state.seenEpisodeIds || parsed.state.seenEpisodeIds.length === 0) &&
+            parsed.state.events?.length > 0
+          ) {
+            const fromHistory = [
+              ...new Set<string>(parsed.state.events.map((e: { episodeId: string }) => e.episodeId)),
+            ];
+            parsed.state.seenEpisodeIds = fromHistory.slice(-MAX_SEEN_IDS);
+          }
           return parsed;
         },
         setItem: (name, value) => {
