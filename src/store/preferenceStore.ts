@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { EngagementEvent, UserPreferences } from '../types/podcast';
 
 const STORAGE_KEY = 'stitch_preferences';
+const MAX_SEEN_IDS = 500;
 
 const SCORE_WEIGHTS = {
   play_start: 0.1,
@@ -13,10 +14,13 @@ const SCORE_WEIGHTS = {
 };
 
 interface PreferenceState extends UserPreferences {
+  seenEpisodeIds: string[]; // persisted, capped at MAX_SEEN_IDS
   recordEvent: (event: Omit<EngagementEvent, 'timestamp'>) => void;
   toggleLike: (episodeId: string) => void;
   completeOnboarding: (categories: string[]) => void;
   isLiked: (episodeId: string) => boolean;
+  markEpisodeSeen: (episodeId: string) => void;
+  getSeenSet: () => Set<string>;
 }
 
 export const usePreferenceStore = create<PreferenceState>()(
@@ -25,9 +29,20 @@ export const usePreferenceStore = create<PreferenceState>()(
       categoryScores: {},
       podcastScores: {},
       likedEpisodeIds: new Set<string>(),
+      seenEpisodeIds: [],
       events: [],
       onboardingComplete: false,
       selectedCategories: [],
+
+      markEpisodeSeen: (episodeId) => {
+        const { seenEpisodeIds } = get();
+        if (seenEpisodeIds.includes(episodeId)) return;
+        // Keep newest MAX_SEEN_IDS — drop oldest from the front
+        const updated = [...seenEpisodeIds, episodeId];
+        set({ seenEpisodeIds: updated.slice(-MAX_SEEN_IDS) });
+      },
+
+      getSeenSet: () => new Set(get().seenEpisodeIds),
 
       recordEvent: (event) => {
         const state = get();
@@ -63,19 +78,13 @@ export const usePreferenceStore = create<PreferenceState>()(
       toggleLike: (episodeId) => {
         const state = get();
         const liked = new Set(state.likedEpisodeIds);
-        if (liked.has(episodeId)) {
-          liked.delete(episodeId);
-        } else {
-          liked.add(episodeId);
-        }
+        liked.has(episodeId) ? liked.delete(episodeId) : liked.add(episodeId);
         set({ likedEpisodeIds: liked });
       },
 
       completeOnboarding: (categories) => {
         const scores: Record<string, number> = {};
-        for (const cat of categories) {
-          scores[cat] = 3; // seed with positive signal
-        }
+        for (const cat of categories) scores[cat] = 3;
         set({
           onboardingComplete: true,
           selectedCategories: categories,
@@ -87,7 +96,6 @@ export const usePreferenceStore = create<PreferenceState>()(
     }),
     {
       name: STORAGE_KEY,
-      // Serialize Set properly
       storage: {
         getItem: (name) => {
           const str = localStorage.getItem(name);

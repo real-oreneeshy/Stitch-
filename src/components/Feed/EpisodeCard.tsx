@@ -8,6 +8,7 @@ import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { usePlayerStore } from '../../store/playerStore';
 import { usePreferences } from '../../hooks/usePreferences';
 import { useFeedStore } from '../../store/feedStore';
+import { usePreferenceStore } from '../../store/preferenceStore';
 
 interface EpisodeCardProps {
   episode: Episode;
@@ -57,6 +58,8 @@ export function EpisodeCard({
       playStartTime.current = Date.now();
       player.load(episode.id, episode.audioUrl, true);
       prefs.onPlayStart(episode);
+      // Mark seen immediately so this episode never reappears in future sessions
+      usePreferenceStore.getState().markEpisodeSeen(episode.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, episode.id]);

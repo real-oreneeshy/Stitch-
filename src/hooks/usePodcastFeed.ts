@@ -41,7 +41,8 @@ export function usePodcastFeed() {
           withTimeout(parsePodcastFeed(p), PER_FEED_TIMEOUT_MS)
             .then(eps => {
               pool.push(...eps);
-              const ranked = rankEpisodes([...pool], prefs, feed.seenIds);
+              // Use persisted seenIds so episodes don't repeat across sessions
+              const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
               feed.replaceUpcoming(ranked);
               // Pre-warm audio for the next 3 upcoming episodes after each pool update
               const { currentIndex, episodes } = useFeedStore.getState();

@@ -25,6 +25,7 @@ export function DiscoverScreen() {
       categoryScores: {},
       podcastScores: {},
       likedEpisodeIds: new Set(),
+      seenEpisodeIds: [],
       events: [],
     });
     feedStore.setEpisodes([]);
