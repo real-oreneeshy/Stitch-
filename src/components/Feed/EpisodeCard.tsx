@@ -7,6 +7,7 @@ import { AudioControls } from '../Player/AudioControls';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { usePlayerStore } from '../../store/playerStore';
 import { usePreferences } from '../../hooks/usePreferences';
+import { useFeedStore } from '../../store/feedStore';
 
 interface EpisodeCardProps {
   episode: Episode;
@@ -43,6 +44,7 @@ export function EpisodeCard({
   const player = useAudioPlayer();
   const playerStore = usePlayerStore();
   const prefs = usePreferences();
+  const feed = useFeedStore();
   const [showInfo, setShowInfo] = useState(false);
   const [showPlayPulse, setShowPlayPulse] = useState(false);
   const playStartTime = useRef<number | null>(null);
@@ -59,18 +61,20 @@ export function EpisodeCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, episode.id]);
 
-  // Track skip engagement when navigating away
+  // Track engagement when navigating away
   useEffect(() => {
     if (!isActive && playStartTime.current && !hasTrackedPlay.current) {
       hasTrackedPlay.current = true;
-      const elapsed = (Date.now() - playStartTime.current) / 1000;
+      const elapsedSeconds = (Date.now() - playStartTime.current) / 1000;
       const duration = player.duration || episode.duration || 1;
-      const listenRatio = Math.min(1, elapsed / duration);
+      const listenRatio = Math.min(1, elapsedSeconds / duration);
 
       if (listenRatio >= 0.8) {
         prefs.onComplete(episode);
+        // Reward: bring another episode from this podcast forward after a 4-episode gap
+        feed.promoteEpisode(episode.podcastId, 4);
       } else {
-        prefs.onSkip(episode, listenRatio);
+        prefs.onSkip(episode, listenRatio, elapsedSeconds);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

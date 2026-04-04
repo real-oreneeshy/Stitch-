@@ -10,29 +10,16 @@ function recencyScore(publishedAt: Date): number {
 function preferenceScore(episode: Episode, prefs: UserPreferences): number {
   let score = 0;
   let weight = 0;
-
   for (const cat of episode.categories) {
-    const catScore = prefs.categoryScores[cat] ?? 0;
-    score += catScore;
+    score += prefs.categoryScores[cat] ?? 0;
     weight += 1;
   }
-
-  const podScore = prefs.podcastScores[episode.podcastId] ?? 0;
-  score += podScore * 2;
+  score += (prefs.podcastScores[episode.podcastId] ?? 0) * 2;
   weight += 2;
-
   return weight > 0 ? score / weight : 0;
 }
 
-/**
- * Interleave episodes across podcasts using a round-robin approach.
- * Each "column" is one podcast's episodes sorted by score descending.
- * We pick one episode per podcast per round, cycling through podcasts
- * ordered by their best episode's score — so preferred podcasts still
- * appear more frequently but never cluster consecutively.
- */
 function interleaveByPodcast(scored: { ep: Episode; total: number }[]): Episode[] {
-  // Group by podcast, each group sorted best-first
   const groups = new Map<string, { ep: Episode; total: number }[]>();
   for (const item of scored) {
     const key = item.ep.podcastId;
@@ -40,14 +27,12 @@ function interleaveByPodcast(scored: { ep: Episode; total: number }[]): Episode[
     groups.get(key)!.push(item);
   }
 
-  // Sort podcasts by their top episode score (best podcast leads each round)
   const podcastQueues = Array.from(groups.values()).sort(
     (a, b) => b[0].total - a[0].total
   );
 
   const result: Episode[] = [];
   let hasMore = true;
-
   while (hasMore) {
     hasMore = false;
     for (const queue of podcastQueues) {
@@ -57,7 +42,32 @@ function interleaveByPodcast(scored: { ep: Episode; total: number }[]): Episode[
       }
     }
   }
+  return result;
+}
 
+/**
+ * Hard enforcement: scan the list and fix any remaining consecutive
+ * same-podcast pairs by swapping the offender with the next available
+ * episode from a different podcast. This is a safety net on top of
+ * interleaveByPodcast — needed when the pool has very few podcasts
+ * or when replaceUpcoming inserts a promoted episode mid-queue.
+ */
+function enforceNonConsecutive(episodes: Episode[]): Episode[] {
+  const result = [...episodes];
+  for (let i = 1; i < result.length; i++) {
+    if (result[i].podcastId !== result[i - 1].podcastId) continue;
+    // Find the closest episode ahead that breaks the chain
+    let swapped = false;
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[j].podcastId !== result[i - 1].podcastId) {
+        [result[i], result[j]] = [result[j], result[i]];
+        swapped = true;
+        break;
+      }
+    }
+    // If no swap was possible (all remaining episodes are the same podcast), stop
+    if (!swapped) break;
+  }
   return result;
 }
 
@@ -71,14 +81,13 @@ export function rankEpisodes(
   const scored = unseen.map(ep => {
     const pScore = preferenceScore(ep, prefs);
     const rScore = recencyScore(ep.publishedAt);
-    // Small random jitter so episodes from same podcast aren't always in same order
     const jitter = Math.random() * 0.05;
     const total = pScore * 0.6 + rScore * 0.3 + jitter;
     return { ep, total };
   });
 
-  // Sort within each podcast group before interleaving
   scored.sort((a, b) => b.total - a.total);
 
-  return interleaveByPodcast(scored);
+  const interleaved = interleaveByPodcast(scored);
+  return enforceNonConsecutive(interleaved);
 }

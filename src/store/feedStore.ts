@@ -14,6 +14,9 @@ interface FeedState {
   // Replace everything AFTER current position with a freshly-interleaved list.
   // Keeps played history intact; avoids clustering from append-only updates.
   replaceUpcoming: (episodes: Episode[]) => void;
+  // After a full listen, find an episode from the same podcast further in the
+  // queue and move it to currentIndex + gapSize so it surfaces soon.
+  promoteEpisode: (podcastId: string, gapSize: number) => void;
   setCurrentIndex: (index: number) => void;
   nextEpisode: () => void;
   prevEpisode: () => void;
@@ -65,6 +68,20 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     if (currentIndex > 0) {
       set({ currentIndex: currentIndex - 1 });
     }
+  },
+
+  promoteEpisode: (podcastId, gapSize) => {
+    const { currentIndex, episodes } = get();
+    const targetPos = currentIndex + gapSize;
+    // Find the first episode from this podcast that is beyond the gap target
+    const sourceIdx = episodes.findIndex(
+      (ep, i) => i > targetPos && ep.podcastId === podcastId
+    );
+    if (sourceIdx === -1) return; // nothing to promote
+    const updated = [...episodes];
+    const [ep] = updated.splice(sourceIdx, 1);
+    updated.splice(targetPos, 0, ep);
+    set({ episodes: updated });
   },
 
   setLoading: (isLoading) => set({ isLoading }),

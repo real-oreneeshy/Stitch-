@@ -18,12 +18,14 @@ export function usePreferences() {
   );
 
   const onSkip = useCallback(
-    (episode: Episode, listenRatio: number) => {
+    (episode: Episode, listenRatio: number, elapsedSeconds: number) => {
+      // Hard 30-second rule: skip before 30s = strong negative signal regardless of ratio
+      const isQuickSkip = elapsedSeconds < 30;
       store.recordEvent({
         episodeId: episode.id,
         podcastId: episode.podcastId,
         categories: episode.categories,
-        type: listenRatio < 0.15 ? 'skip_early' : 'play_start',
+        type: isQuickSkip ? 'skip_early' : 'play_start',
         listenRatio,
       });
     },
