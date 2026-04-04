@@ -3,28 +3,17 @@ import { Howl } from 'howler';
 import { usePlayerStore } from '../store/playerStore';
 
 let currentHowl: Howl | null = null;
+let loadGeneration = 0; // incremented on every load(); callbacks check this to abort if stale
 
-// Pre-load cache: audioUrl → Howl that is already buffering
 const preloadCache = new Map<string, Howl>();
 
 export function preloadAudio(audioUrl: string) {
   if (!audioUrl || preloadCache.has(audioUrl)) return;
-  const howl = new Howl({
-    src: [audioUrl],
-    html5: true,
-    preload: true,
-    volume: 0,
-    autoplay: false,
-  });
+  const howl = new Howl({ src: [audioUrl], html5: true, preload: true, volume: 0, autoplay: false });
   preloadCache.set(audioUrl, howl);
-
-  // Cap cache size at 4 to avoid memory bloat
   if (preloadCache.size > 4) {
     const oldest = preloadCache.keys().next().value;
-    if (oldest) {
-      preloadCache.get(oldest)?.unload();
-      preloadCache.delete(oldest);
-    }
+    if (oldest) { preloadCache.get(oldest)?.unload(); preloadCache.delete(oldest); }
   }
 }
 
@@ -39,67 +28,63 @@ export function useAudioPlayer() {
     }
   }, []);
 
-  const attachHandlers = useCallback(
-    (howl: Howl, autoplay: boolean) => {
-      howl.on('load', () => {
-        store.setDuration(howl.duration() ?? 0);
-        if (autoplay) howl.play();
-      });
-      howl.on('play', () => {
-        store.setStatus('playing');
-        progressInterval.current = window.setInterval(() => {
-          if (howl.playing()) store.setCurrentTime(howl.seek() as number);
-        }, 500);
-      });
-      howl.on('pause', () => { store.setStatus('paused'); clearProgress(); });
-      howl.on('end',   () => { store.setStatus('idle');   clearProgress(); });
-      howl.on('stop',  () => { store.setStatus('idle');   clearProgress(); });
-      howl.on('loaderror',  () => { store.setStatus('error'); clearProgress(); });
-      howl.on('playerror', () => { store.setStatus('error'); clearProgress(); });
-    },
-    [store, clearProgress]
-  );
-
   const load = useCallback(
     (episodeId: string, audioUrl: string, autoplay = true) => {
-      if (currentHowl) {
-        currentHowl.unload();
-        currentHowl = null;
-      }
+      // Stop and discard whatever was playing
+      if (currentHowl) { currentHowl.unload(); currentHowl = null; }
       clearProgress();
+
+      // Stamp this load; any callback from an older load will bail out
+      const gen = ++loadGeneration;
+      const isStale = () => gen !== loadGeneration;
 
       store.setCurrentEpisodeId(episodeId);
       store.setStatus('loading');
 
-      // Use pre-loaded Howl if available — audio already buffered
       const cached = preloadCache.get(audioUrl);
-      if (cached) {
-        preloadCache.delete(audioUrl);
-        cached.volume(store.volume);
-        cached.mute(store.muted);
-        currentHowl = cached;
-        attachHandlers(cached, autoplay);
-        // If it's already loaded, play right away; otherwise wait for onload
-        if (cached.state() === 'loaded') {
-          store.setDuration(cached.duration());
-          if (autoplay) cached.play();
-        }
-        return;
-      }
+      if (cached) preloadCache.delete(audioUrl);
 
-      currentHowl = new Howl({
-        src: [audioUrl],
-        html5: true,
-        volume: store.volume,
-        mute: store.muted,
+      const howl = cached ?? new Howl({ src: [audioUrl], html5: true, volume: store.volume, mute: store.muted });
+      currentHowl = howl;
+
+      if (cached) { howl.volume(store.volume); howl.mute(store.muted); }
+
+      // Use once() so load event never fires twice
+      howl.once('load', () => {
+        if (isStale()) return;
+        store.setDuration(howl.duration() ?? 0);
+        if (autoplay) howl.play();
       });
-      attachHandlers(currentHowl, autoplay);
-    },
-    [store, clearProgress, attachHandlers]
-  );
 
-  const play = useCallback(() => { currentHowl?.play(); }, []);
-  const pause = useCallback(() => { currentHowl?.pause(); }, []);
+      howl.on('play', () => {
+        if (isStale()) { howl.stop(); return; } // stale — kill it immediately
+        store.setStatus('playing');
+        clearProgress();
+        progressInterval.current = window.setInterval(() => {
+          if (howl.playing()) store.setCurrentTime(howl.seek() as number);
+        }, 500);
+      });
+
+      howl.on('pause', () => { if (!isStale()) { store.setStatus('paused'); clearProgress(); } });
+      howl.on('end',   () => { if (!isStale()) { store.setStatus('idle');   clearProgress(); } });
+      howl.on('stop',  () => { if (!isStale()) { store.setStatus('idle');   clearProgress(); } });
+      howl.on('loaderror',  () => { if (!isStale()) { store.setStatus('error'); clearProgress(); } });
+      howl.on('playerror', () => {
+        if (isStale()) return;
+        store.setStatus('error');
+        clearProgress();
+      });
+
+      // If pre-loaded and already ready, play immediately without waiting for 'load'
+      if (cached && howl.state() === 'loaded') {
+        if (!isStale()) {
+          store.setDuration(howl.duration() ?? 0);
+          if (autoplay) howl.play();
+        }
+      }
+    },
+    [store, clearProgress]
+  );
 
   const togglePlay = useCallback(() => {
     if (!currentHowl) return;
@@ -111,27 +96,19 @@ export function useAudioPlayer() {
   }, [store]);
 
   const setVolume = useCallback((volume: number) => {
-    currentHowl?.volume(volume);
-    store.setVolume(volume);
+    currentHowl?.volume(volume); store.setVolume(volume);
   }, [store]);
 
-  const stop = useCallback(() => {
-    currentHowl?.stop();
-    clearProgress();
-  }, [clearProgress]);
+  const stop = useCallback(() => { currentHowl?.stop(); clearProgress(); }, [clearProgress]);
 
   useEffect(() => { currentHowl?.mute(store.muted); }, [store.muted]);
 
   useEffect(() => {
-    return () => {
-      clearProgress();
-      currentHowl?.unload();
-      currentHowl = null;
-    };
+    return () => { clearProgress(); currentHowl?.unload(); currentHowl = null; };
   }, [clearProgress]);
 
   return {
-    load, play, pause, togglePlay, seek, setVolume, stop,
+    load, togglePlay, seek, setVolume, stop,
     status: store.status,
     currentTime: store.currentTime,
     duration: store.duration,
