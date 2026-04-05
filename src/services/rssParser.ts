@@ -1,38 +1,36 @@
-import { fetchWithProxy } from './corsProxy';
 import type { Episode, Podcast } from '../types/podcast';
 
-function parseISO8601Duration(duration: string): number {
-  if (!duration) return 0;
-  const parts = duration.split(':').map(Number);
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return parseInt(duration, 10) || 0;
+// rss2json converts any RSS feed to JSON, caches results server-side,
+// and is CORS-friendly — no proxy chain needed.
+const RSS2JSON = 'https://api.rss2json.com/v1.api';
+
+interface Rss2JsonEnclosure {
+  link: string;
+  type: string;
+  length: number;
 }
 
-function getTextContent(el: Element | null, tag: string): string {
-  if (!el) return '';
-  const node = el.querySelector(tag);
-  return node?.textContent?.trim() ?? '';
+interface Rss2JsonItem {
+  title: string;
+  pubDate: string;
+  link: string;
+  guid: string;
+  thumbnail: string;
+  description: string;
+  enclosure: Rss2JsonEnclosure | Record<string, never>;
+  categories: string[];
 }
 
-function getAttr(el: Element | null, tag: string, attr: string): string {
-  if (!el) return '';
-  const node = el.querySelector(tag);
-  return node?.getAttribute(attr) ?? '';
+interface Rss2JsonResponse {
+  status: string;
+  feed: { image: string; title: string };
+  items: Rss2JsonItem[];
 }
 
-/**
- * Stable deterministic ID — same inputs always produce the same output.
- * Uses the RSS GUID when present (preferred), otherwise hashes
- * podcastId + title + pubDate so the ID survives across loads even if
- * GUID is absent or contains unpredictable query strings.
- */
 function stableId(podcastId: string, title: string, pubDate: string, guid: string): string {
-  // Use GUID only if it looks like a clean stable identifier
   if (guid && guid.length > 0 && guid.length < 200 && !guid.includes(' ')) {
     return `${podcastId}::${guid}`;
   }
-  // Fallback: hash of podcast + title + date
   const raw = `${podcastId}::${title}::${pubDate}`;
   let h = 5381;
   for (let i = 0; i < raw.length; i++) {
@@ -42,50 +40,34 @@ function stableId(podcastId: string, title: string, pubDate: string, guid: strin
 }
 
 export async function parsePodcastFeed(podcast: Podcast): Promise<Episode[]> {
-  const xml = await fetchWithProxy(podcast.feedUrl);
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xml, 'application/xml');
+  const url = `${RSS2JSON}?rss_url=${encodeURIComponent(podcast.feedUrl)}&count=20`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`rss2json ${res.status}`);
 
-  const items = Array.from(doc.querySelectorAll('item'));
+  const data: Rss2JsonResponse = await res.json();
+  if (data.status !== 'ok') throw new Error(`rss2json status: ${data.status}`);
+
   const episodes: Episode[] = [];
 
-  for (const item of items.slice(0, 20)) {
-    const audioUrl =
-      item.querySelector('enclosure')?.getAttribute('url') ??
-      item.querySelector('link')?.textContent?.trim() ??
-      '';
-
+  for (const item of data.items) {
+    const enc = item.enclosure as Rss2JsonEnclosure | Record<string, never>;
+    const audioUrl = 'link' in enc ? enc.link : '';
     if (!audioUrl) continue;
 
-    const imageUrl =
-      item.querySelector('image url')?.textContent?.trim() ??
-      getAttr(item, 'itunes\\:image, image', 'href') ??
-      podcast.imageUrl;
-
-    const durationRaw = getTextContent(item, 'itunes\\:duration');
-    const duration = parseISO8601Duration(durationRaw);
-
-    const pubDateStr = getTextContent(item, 'pubDate');
-    const publishedAt = pubDateStr ? new Date(pubDateStr) : new Date();
-    const title = getTextContent(item, 'title') || 'Untitled Episode';
-    const guid = getTextContent(item, 'guid');
-
-    const description =
-      getTextContent(item, 'itunes\\:summary') ||
-      getTextContent(item, 'description') ||
-      '';
+    const imageUrl = item.thumbnail || podcast.imageUrl;
+    const description = (item.description || '').replace(/<[^>]*>/g, '').trim();
 
     episodes.push({
-      id: stableId(podcast.id, title, pubDateStr, guid),
+      id: stableId(podcast.id, item.title, item.pubDate, item.guid),
       podcastId: podcast.id,
       podcastTitle: podcast.title,
       podcastImageUrl: podcast.imageUrl,
-      title,
-      description: description.replace(/<[^>]*>/g, '').trim(),
+      title: item.title || 'Untitled Episode',
+      description,
       audioUrl,
       imageUrl,
-      duration,
-      publishedAt,
+      duration: 0,
+      publishedAt: item.pubDate ? new Date(item.pubDate) : new Date(),
       categories: podcast.categories,
     });
   }

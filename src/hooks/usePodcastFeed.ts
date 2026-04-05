@@ -8,15 +8,9 @@ import { SEED_PODCASTS } from '../services/seedCatalog';
 import type { Episode, Podcast } from '../types/podcast';
 
 const FEED_LOAD_THRESHOLD = 5;
-// Any feed slower than this is skipped for the visible pool (still resolves eventually)
-const PER_FEED_TIMEOUT_MS = 7000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-  ]);
-}
+// Render the feed once this many distinct podcasts have resolved —
+// fast with rss2json since responses are cached JSON (usually < 1s each)
+const FIRST_RENDER_MIN_PODCASTS = 5;
 
 export function usePodcastFeed() {
   const feed = useFeedStore();
@@ -31,40 +25,43 @@ export function usePodcastFeed() {
       feed.setError(null);
 
       const pool: Episode[] = [];
-      const podcastsInPool = new Set<string>();
-      // Don't show anything until we have at least this many distinct podcasts —
-      // prevents the first-feed cluster where only 1 podcast is visible
-      const MIN_DIVERSITY = 3;
+      let firstRenderDone = false;
+
+      const renderFeed = () => {
+        if (pool.length === 0) return;
+        const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
+        feed.replaceUpcoming(ranked);
+        const { currentIndex, episodes } = useFeedStore.getState();
+        for (let i = 1; i <= 3; i++) {
+          const ep = episodes[currentIndex + i];
+          if (ep?.audioUrl) preloadAudio(ep.audioUrl);
+        }
+      };
 
       await Promise.allSettled(
         podcasts.map(p =>
-          withTimeout(parsePodcastFeed(p), PER_FEED_TIMEOUT_MS)
+          parsePodcastFeed(p)
             .then(eps => {
               pool.push(...eps);
-              eps.forEach(ep => podcastsInPool.add(ep.podcastId));
 
-              // Wait for 3 distinct podcasts before first render to avoid
-              // clustering — but always proceed once pool is large enough
-              if (podcastsInPool.size < MIN_DIVERSITY && pool.length < 60) return;
-
-              const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
-              feed.replaceUpcoming(ranked);
-              const { currentIndex, episodes } = useFeedStore.getState();
-              for (let i = 1; i <= 3; i++) {
-                const ep = episodes[currentIndex + i];
-                if (ep?.audioUrl) preloadAudio(ep.audioUrl);
+              // First render: fire as soon as we have enough diverse podcasts
+              if (!firstRenderDone) {
+                const podcastsInPool = new Set(pool.map(e => e.podcastId)).size;
+                if (podcastsInPool >= FIRST_RENDER_MIN_PODCASTS) {
+                  firstRenderDone = true;
+                  renderFeed();
+                  feed.setLoading(false);
+                }
               }
             })
             .catch(() => {})
         )
       );
 
-      // Fallback: render whatever resolved even if diversity threshold was never met
-      // (handles slow connections where < 3 feeds return within the timeout)
-      if (pool.length > 0 && useFeedStore.getState().episodes.length === 0) {
-        const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
-        feed.replaceUpcoming(ranked);
-      } else if (pool.length === 0) {
+      // Final pass — updates feed with all resolved episodes
+      if (pool.length > 0) {
+        renderFeed();
+      } else {
         feed.setError('No episodes loaded. Check your connection and retry.');
       }
 
@@ -78,7 +75,7 @@ export function usePodcastFeed() {
     const seedPool = [...SEED_PODCASTS];
     const { selectedCategories } = prefs;
 
-    // Preferred-category podcasts sort first so they tend to resolve earlier
+    // Sort preferred-category podcasts first so they resolve and render sooner
     if (selectedCategories.length > 0) {
       seedPool.sort((a, b) => {
         const aMatch = a.categories.some(c => selectedCategories.includes(c)) ? 0 : 1;
