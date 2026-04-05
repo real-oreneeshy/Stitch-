@@ -15,9 +15,9 @@ export function preloadAudio(audioUrl: string) {
   if (!audioUrl || preloadCache.has(audioUrl)) return;
   const howl = new Howl({ src: [audioUrl], html5: true, preload: true, volume: 0, autoplay: false });
   preloadCache.set(audioUrl, howl);
-  // Keep cache small — more than 2 preloads risks extra <audio> elements
-  // interfering with the iOS audio session on background/foreground.
-  if (preloadCache.size > 2) {
+  // Cap at 3: enough for current + 2 ahead; visibilitychange handler
+  // collapses duplicates on foreground so iOS interference is handled.
+  if (preloadCache.size > 3) {
     const oldest = preloadCache.keys().next().value;
     if (oldest) { preloadCache.get(oldest)?.unload(); preloadCache.delete(oldest); }
   }

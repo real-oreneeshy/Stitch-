@@ -23,9 +23,11 @@ export function SwipeableFeed() {
   const currentEpisode = episodes[currentIndex] ?? null;
   const direction = useRef(0);
 
-  // Pre-load audio for next 2 episodes whenever index changes
+  // Pre-load audio for current + next 2 episodes whenever index changes.
+  // Including index 0 (current) gives it a buffering head-start before
+  // EpisodeCard's useEffect calls player.load() a render later.
   useEffect(() => {
-    for (let i = 1; i <= 2; i++) {
+    for (let i = 0; i <= 2; i++) {
       const ep = episodes[currentIndex + i];
       if (ep?.audioUrl) preloadAudio(ep.audioUrl);
     }

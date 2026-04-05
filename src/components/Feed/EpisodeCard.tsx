@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Share2, Info, ChevronUp, ChevronDown, Play, Pause } from 'lucide-react';
+import { Heart, Share2, Info, ChevronUp, ChevronDown, Play, Pause, Loader2 } from 'lucide-react';
 import type { Episode } from '../../types/podcast';
 import { ProgressBar } from '../UI/ProgressBar';
 import { AudioControls } from '../Player/AudioControls';
@@ -84,6 +84,7 @@ export function EpisodeCard({
   }, [isActive]);
 
   const isCurrentEpisode = playerStore.currentEpisodeId === episode.id;
+  const isBuffering = isCurrentEpisode && playerStore.status === 'loading';
   const currentTime = isCurrentEpisode ? playerStore.currentTime : 0;
   const duration = isCurrentEpisode ? playerStore.duration : episode.duration;
 
@@ -140,6 +141,13 @@ export function EpisodeCard({
             alt={episode.title}
             className="w-full h-full object-cover"
           />
+          {/* Buffering overlay */}
+          {isBuffering && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-2xl">
+              <Loader2 size={48} className="text-white animate-spin" />
+            </div>
+          )}
+
           {/* Play/pause pulse overlay */}
           <AnimatePresence>
             {showPlayPulse && (
@@ -256,13 +264,15 @@ export function EpisodeCard({
           </motion.p>
         )}
 
-        {/* Duration */}
-        {duration > 0 && (
-          <div className="flex justify-between text-white/50 text-xs mb-2">
+        {/* Duration / buffering state */}
+        <div className="flex justify-between text-white/50 text-xs mb-2">
+          {isBuffering ? (
+            <span className="text-white/70 animate-pulse">Buffering…</span>
+          ) : (
             <span>{formatTime(currentTime)}</span>
-            <span>{formatDuration(duration)}</span>
-          </div>
-        )}
+          )}
+          {duration > 0 && <span>{formatDuration(duration)}</span>}
+        </div>
 
         {/* Progress bar */}
         <ProgressBar
