@@ -43,22 +43,30 @@ export function usePodcastFeed() {
               pool.push(...eps);
               eps.forEach(ep => podcastsInPool.add(ep.podcastId));
 
-              // Only update the visible feed once we have enough variety,
-              // or if this is likely one of the last feeds (pool is large enough)
+              // Wait for 3 distinct podcasts before first render to avoid
+              // clustering — but always proceed once pool is large enough
               if (podcastsInPool.size < MIN_DIVERSITY && pool.length < 60) return;
 
               const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
               feed.replaceUpcoming(ranked);
-              // Pre-warm audio for the next 3 upcoming episodes after each pool update
               const { currentIndex, episodes } = useFeedStore.getState();
               for (let i = 1; i <= 3; i++) {
                 const ep = episodes[currentIndex + i];
                 if (ep?.audioUrl) preloadAudio(ep.audioUrl);
               }
             })
-            .catch(() => {}) // timeout or parse error — silently skip
+            .catch(() => {})
         )
       );
+
+      // Fallback: render whatever resolved even if diversity threshold was never met
+      // (handles slow connections where < 3 feeds return within the timeout)
+      if (pool.length > 0 && useFeedStore.getState().episodes.length === 0) {
+        const ranked = rankEpisodes([...pool], prefs, prefs.getSeenSet());
+        feed.replaceUpcoming(ranked);
+      } else if (pool.length === 0) {
+        feed.setError('No episodes loaded. Check your connection and retry.');
+      }
 
       feed.setLoading(false);
       loadingRef.current = false;
