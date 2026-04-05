@@ -1,73 +1,54 @@
 import type { Episode, Podcast } from '../types/podcast';
 
-// rss2json converts any RSS feed to JSON, caches results server-side,
-// and is CORS-friendly — no proxy chain needed.
-const RSS2JSON = 'https://api.rss2json.com/v1.api';
+// iTunes Lookup API — CORS-enabled natively (no proxy), no API key, Apple CDN speeds.
+// Returns JSON with episodeUrl as the full audio URL (not a 30-second preview).
+const ITUNES_LOOKUP = 'https://itunes.apple.com/lookup';
 
-interface Rss2JsonEnclosure {
-  link: string;
-  type: string;
-  length: number;
+interface ItunesResult {
+  wrapperType: string;
+  kind?: string;
+  trackId?: number;
+  trackName?: string;
+  description?: string;
+  previewUrl?: string;
+  artworkUrl160?: string;
+  artworkUrl600?: string;
+  releaseDate?: string;
+  trackTimeMillis?: number;
 }
 
-interface Rss2JsonItem {
-  title: string;
-  pubDate: string;
-  link: string;
-  guid: string;
-  thumbnail: string;
-  description: string;
-  enclosure: Rss2JsonEnclosure | Record<string, never>;
-  categories: string[];
-}
-
-interface Rss2JsonResponse {
-  status: string;
-  feed: { image: string; title: string };
-  items: Rss2JsonItem[];
-}
-
-function stableId(podcastId: string, title: string, pubDate: string, guid: string): string {
-  if (guid && guid.length > 0 && guid.length < 200 && !guid.includes(' ')) {
-    return `${podcastId}::${guid}`;
-  }
-  const raw = `${podcastId}::${title}::${pubDate}`;
-  let h = 5381;
-  for (let i = 0; i < raw.length; i++) {
-    h = Math.imul(31, h) + raw.charCodeAt(i) | 0;
-  }
-  return `ep_${Math.abs(h).toString(36)}`;
+interface ItunesResponse {
+  resultCount: number;
+  results: ItunesResult[];
 }
 
 export async function parsePodcastFeed(podcast: Podcast): Promise<Episode[]> {
-  const url = `${RSS2JSON}?rss_url=${encodeURIComponent(podcast.feedUrl)}&count=20`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`rss2json ${res.status}`);
+  const url = `${ITUNES_LOOKUP}?id=${encodeURIComponent(podcast.id)}&entity=podcastEpisode&limit=20`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`iTunes API ${res.status}`);
 
-  const data: Rss2JsonResponse = await res.json();
-  if (data.status !== 'ok') throw new Error(`rss2json status: ${data.status}`);
-
+  const data: ItunesResponse = await res.json();
   const episodes: Episode[] = [];
 
-  for (const item of data.items) {
-    const enc = item.enclosure as Rss2JsonEnclosure | Record<string, never>;
-    const audioUrl = 'link' in enc ? enc.link : '';
-    if (!audioUrl) continue;
+  for (const item of data.results) {
+    // First result is the podcast collection, skip it
+    if (item.wrapperType === 'collection') continue;
+    if (!item.previewUrl || !item.trackId) continue;
 
-    const imageUrl = item.thumbnail || podcast.imageUrl;
-    const description = (item.description || '').replace(/<[^>]*>/g, '').trim();
+    const imageUrl = item.artworkUrl600 || item.artworkUrl160 || podcast.imageUrl;
+    const description = (item.description ?? '').replace(/<[^>]*>/g, '').trim();
 
     episodes.push({
-      id: stableId(podcast.id, item.title, item.pubDate, item.guid),
+      id: `${podcast.id}::${item.trackId}`,
       podcastId: podcast.id,
       podcastTitle: podcast.title,
       podcastImageUrl: podcast.imageUrl,
-      title: item.title || 'Untitled Episode',
+      title: item.trackName || 'Untitled Episode',
       description,
-      audioUrl,
+      audioUrl: item.previewUrl,
       imageUrl,
-      duration: 0,
-      publishedAt: item.pubDate ? new Date(item.pubDate) : new Date(),
+      duration: item.trackTimeMillis ? Math.round(item.trackTimeMillis / 1000) : 0,
+      publishedAt: item.releaseDate ? new Date(item.releaseDate) : new Date(),
       categories: podcast.categories,
     });
   }
