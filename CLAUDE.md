@@ -104,21 +104,39 @@ src/
 
 8. **Seen episodes**: `seenEpisodeIds` (string[], persisted, capped at 500) in preferenceStore. Marked immediately on card activation. `rankEpisodes` filters them out.
 
-## Current Status (as of last session)
+## Current Status
 
 ### Working
 - Diverse, randomised feed from 20 seed podcasts
 - TikTok-style swipe UX with auto-play
 - Audio preloading (current + next 2)
 - Buffering indicator (spinner + "Buffering…" text)
-- iOS background/foreground audio fix
+- iOS background/foreground audio fix (visibilitychange stop/play/seek cycle)
 - Preference tracking and seen-episode persistence
 - GitHub Pages deployment via Actions
+- No consecutive same-podcast episodes (enforceNonConsecutive)
 
-### Known Issues / Next Steps
-- **Audio latency on slow servers**: Some podcasts (Hardcore History, Darknet Diaries, Masters of Scale) have slow audio servers. Preloading helps for episodes 2+ but the first episode can still buffer. Two proposed solutions not yet implemented:
-  - Option A: Only show episodes in feed once their audio is cached (background preload → ready queue)
-  - Option B: Remove consistently slow podcasts from seed catalog
-- **UI upgrade**: Card design, swipe feel, animations — not yet prioritised
-- **Catalog expansion**: Currently 20 hardcoded seed podcasts. Could integrate iTunes Search for dynamic discovery.
-- `corsProxy.ts` is dead code — can be deleted when convenient
+### Current Focus — Audio Latency
+Instant playback is critical for engagement. Most episodes play instantly thanks to
+preloading, but some podcasts (Hardcore History, Darknet Diaries, Masters of Scale)
+have slow audio servers causing 5-30s buffering on first play.
+
+**Agreed approach (not yet implemented):** Only surface episodes in the feed once
+their audio is cached. Slow episodes preload in the background and appear in the
+feed when ready. This means:
+- Track which audio URLs have finished preloading (Howl `load` event → "ready" set)
+- Feed ranking gives a large score boost to ready episodes so they float to the top
+- Episodes from slow servers still appear — just later, once buffered
+- The user never sees a buffering spinner; every swipe is instant
+
+Implementation touches: `useAudioPlayer.ts` (export ready-tracking), `feedAlgorithm.ts`
+(ready bonus in scoring), `usePodcastFeed.ts` (broader preloading + periodic re-rank).
+
+### Roadmap (priority order)
+1. **Audio latency** — implement ready-first feed (see above)
+2. **UI upgrade** — card design, swipe feel, animations, polish
+3. **Catalog expansion** — more podcasts, iTunes Search for dynamic discovery
+4. **Preference refinement** — better engagement signals, category tuning
+
+### Cleanup
+- `corsProxy.ts` is dead code — nothing imports it, safe to delete
